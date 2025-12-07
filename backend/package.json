@@ -12,6 +12,7 @@
   "dependencies": {
     "cors": "^2.8.5",
     "express": "^5.2.1",
-    "fs-extra": "^11.3.2"
+    "fs-extra": "^11.3.2",
+    "mysql2": "^3.15.3"
   }
 }

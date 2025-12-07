@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const fs = require('fs-extra');
 const path = require('path');
+const mysql = require('mysql2/promise');
 
 const app = express();
 const PORT = 3001;
@@ -11,13 +12,30 @@ app.use(express.json());
 
 const PLMN_CONFIG_PATH = process.env.PLMN_CONFIG_PATH || path.join(
   process.env.HOME,
-  '/config/gnb.conf'
+  '/openairinterface5g/targets/PROJECTS/GENERIC-NR-5GC/CONF/gnb.sa.band78.fr1.106PRB.usrpb210.conf'
 );
 
 const SIB8_CONFIG_PATH = process.env.SIB8_CONFIG_PATH || path.join(
   process.env.HOME,
-  '/config/sib8.conf'
+  '/openairinterface5g/sib8.conf'
 );
+
+
+const db = mysql.createPool({
+  host: process.env.DB_HOST || 'mysql',   // name of the mysql container
+  user: process.env.DB_USER || 'test',
+  password: process.env.DB_PASSWORD || 'test',
+  database: process.env.DB_NAME || 'oai_db'
+});
+
+(async () => {
+  try {
+    await db.query('SELECT 1');
+    console.log('✅ Connected to MySQL');
+  } catch (err) {
+    console.error('❌ Failed to connect to MySQL:', err.message);
+  }
+})();
 
 function parsePlmnConfig(content) {
   const config = {
@@ -162,6 +180,137 @@ app.post('/api/sib8', async (req, res) => {
   } catch (error) {
     console.error('Error writing SIB8 config:', error);
     res.status(500).json({ error: 'Failed to save SIB8 configuration' });
+  }
+});
+
+app.get('/api/subscribers', async (req, res) => {
+  try {
+    const [rows] = await db.query(
+      'SELECT ueid, encPermanentKey, encOpcKey FROM AuthenticationSubscription ORDER BY ueid'
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error('Error fetching subscribers:', err);
+    res.status(500).json({ error: 'Failed to fetch subscribers' });
+  }
+});
+
+app.post('/api/subscribers', async (req, res) => {
+  try {
+    let { ueid, encPermanentKey, encOpcKey } = req.body;
+
+    if (!ueid) {
+      return res.status(400).json({ error: 'ueid is required' });
+    }
+
+    const DEFAULT_K = '5686e601f3a1942d4c5cd262ba6b4b20';
+    const DEFAULT_OPC = 'aeb1cabd8ed7a09b48d17eb3d8af172c';
+
+    encPermanentKey = encPermanentKey || DEFAULT_K;
+    encOpcKey = encOpcKey || DEFAULT_OPC;
+
+    const authenticationMethod = '5G_AKA';
+    const protectionParameterId = encPermanentKey;
+    const sequenceNumber = JSON.stringify({
+      sqn: '000000000000',
+      sqnScheme: 'NON_TIME_BASED',
+      lastIndexes: { ausf: 0 }
+    });
+    const authenticationManagementField = '8000';
+    const algorithmId = 'milenage';
+
+    await db.query(
+      `INSERT INTO AuthenticationSubscription 
+       (ueid, authenticationMethod, encPermanentKey, protectionParameterId, sequenceNumber,
+        authenticationManagementField, algorithmId, encOpcKey, encTopcKey,
+        vectorGenerationInHss, n5gcAuthMethod, rgAuthenticationInd, supi)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, ?)`,
+      [
+        ueid,
+        authenticationMethod,
+        encPermanentKey,
+        protectionParameterId,
+        sequenceNumber,
+        authenticationManagementField,
+        algorithmId,
+        encOpcKey,
+        ueid
+      ]
+    );
+
+    res.json({ success: true, message: 'Subscriber added' });
+  } catch (err) {
+    console.error('Error adding subscriber:', err);
+    res.status(500).json({ error: 'Failed to add subscriber' });
+  }
+});
+
+
+app.put('/api/subscribers/:ueid', async (req, res) => {
+  const oldUeid = req.params.ueid;
+  const { ueid: newUeid, encPermanentKey, encOpcKey } = req.body;
+
+  if (!newUeid && !encPermanentKey && !encOpcKey) {
+    return res.status(400).json({ error: 'Nothing to update' });
+  }
+
+  try {
+    const fields = [];
+    const values = [];
+
+    if (newUeid) {
+      fields.push('ueid = ?', 'supi = ?');
+      values.push(newUeid, newUeid);
+    }
+
+    if (encPermanentKey) {
+      fields.push('encPermanentKey = ?', 'protectionParameterId = ?');
+      values.push(encPermanentKey, encPermanentKey);
+    }
+
+    if (encOpcKey) {
+      fields.push('encOpcKey = ?');
+      values.push(encOpcKey);
+    }
+
+    values.push(oldUeid);
+
+    const [result] = await db.query(
+      `UPDATE AuthenticationSubscription 
+       SET ${fields.join(', ')} 
+       WHERE ueid = ?`,
+      values
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: 'Subscriber not found' });
+    }
+
+    res.json({ success: true, message: 'Subscriber updated' });
+  } catch (err) {
+    console.error('Error updating subscriber:', err);
+    res.status(500).json({ error: 'Failed to update subscriber' });
+  }
+});
+
+
+app.delete('/api/subscribers/:ueid', async (req, res) => {
+  const { ueid } = req.params;
+
+  try {
+    const [result] = await db.query(
+      'DELETE FROM AuthenticationSubscription WHERE ueid = ?',
+      [ueid]
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: 'Subscriber not found' });
+    }
+
+    res.json({ success: true, message: 'Subscriber deleted' });
+  } catch (err) {
+    console.error('Error deleting subscriber:', err);
+    res.status(500).json({ error: 'Failed to delete subscriber' });
   }
 });
 
