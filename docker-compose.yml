@@ -1,6 +1,6 @@
 services:
   backend:
-    build: ./backend
+    image: abouhasna8/nms-backend:latest
     container_name: nms-backend
     ports:
       - "3001:3001"
@@ -12,7 +12,7 @@ services:
       - SIB8_CONFIG_PATH=/config/sib8.conf
 
   frontend:
-    build: ./frontend
+    image: abouhasna8/nms-frontend:latest
     container_name: nms-frontend
     ports:
       - "3000:80"
