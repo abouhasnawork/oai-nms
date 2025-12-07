@@ -10,6 +10,12 @@ services:
     environment:
       - PLMN_CONFIG_PATH=/config/gnb.conf
       - SIB8_CONFIG_PATH=/config/sib8.conf
+      - DB_HOST=mysql
+      - DB_USER=test
+      - DB_PASSWORD=test
+      - DB_NAME=oai_db
+    networks:
+      - oai-cn5g-public-net
 
   frontend:
     image: abouhasna8/nms-frontend:latest
@@ -18,3 +24,7 @@ services:
       - "3000:80"
     depends_on:
       - backend
+
+networks:
+  oai-cn5g-public-net:
+    external: true
